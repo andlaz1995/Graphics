@@ -25,19 +25,35 @@ vec4 camera_pos(0, 0, -3.001,1);
 mat4 R;
 float f = SCREEN_HEIGHT;
 float yaw = (0.0f * 3.1415926 / 180); // Yaw angle controlling camera rotation around y-axis
+float depthBuffer[SCREEN_HEIGHT][SCREEN_WIDTH];
+static vec3 anti_aliasing[SCREEN_WIDTH / 2][SCREEN_HEIGHT / 2];
+static vec3 original_img[SCREEN_WIDTH][SCREEN_HEIGHT];
 
-//SDL_Surface* screen;
+struct Pixel
+{
+    int x;
+    int y;
+    float zinv;
+    // vec3 illumination;
+    //vec3 pos3d;
+    //int triangle_index;
+
+};
+
 
 /* ----------------------------------------------------------------------------*/
 /* FUNCTIONS                                                                   */
 
 bool Update();
 void Draw(screen* screen);
-void VertexShader( const vec4& v, ivec2& p );
-void Interpolate( ivec2 a, ivec2 b, vector<ivec2>& result );
-void DrawLineSDL( screen* screen, ivec2 a, ivec2 b, vec3 color );
+void VertexShader( const vec4& v, Pixel& p );
+void Interpolate( Pixel a, Pixel b, vector<Pixel>& result );
+void DrawLineSDL( screen* screen, Pixel a, Pixel b, vec3 color );
 void DrawPolygonEdges( const vector<vec4>& vertices, screen* screen );
-
+void DrawPolygon( const vector<vec4>& vertices, vec3 color, screen* screen);
+void ComputePolygonRows(const vector<Pixel>& vertexPixels, vector<Pixel>& leftPixels, vector<Pixel>& rightPixels );
+void DrawPolygonRows(vector<Pixel>& leftPixels, vector<Pixel>& rightPixels, vec3 color, screen* screen);
+void PixelShader( const Pixel& p, vec3 color, screen* screen );
 
 int main( int argc, char* argv[] )
 {
@@ -71,7 +87,15 @@ void Draw(screen* screen)
     }
     */
     
-    memset(screen->buffer, 0, screen->height*screen->width*sizeof(uint32_t));
+    //memset(screen->buffer, 0, screen->height*screen->width*sizeof(uint32_t));
+   memset(depthBuffer, 0, sizeof(depthBuffer));
+   
+   //initial depth buffer
+   
+    for( int y=0; y<SCREEN_HEIGHT; ++y )
+    for( int x=0; x<SCREEN_WIDTH; ++x )
+    depthBuffer[y][x] = 0;
+    
     LoadTestModel(triangles);
     R = mat4(cos(yaw), 0, sin(yaw), 0, 0, 1, 0, 0, -sin(yaw), 0, cos(yaw),0 ,0 ,0, 0, -1);
     for( uint32_t i=0; i<triangles.size(); ++i )
@@ -80,58 +104,82 @@ void Draw(screen* screen)
         vertices[0] = triangles[i].v0;
         vertices[1] = triangles[i].v1;
         vertices[2] = triangles[i].v2;
+        vec3 color  = triangles[i].color;
         
-         DrawPolygonEdges (vertices, screen);
+          //DrawPolygonEdges (vertices, screen);
+          DrawPolygon(vertices, color, screen);
 
-        for(int v=0; v<3; ++v)
-        {
-            /*ivec2 projPos;
+        //for(int v=0; v<3; ++v)
+        //{
+            /*Pixel projPos;
            
             VertexShader( vertices[v], projPos );
             vec3 color(1,1,1);*/
             //PutPixelSDL( screen, projPos.x, projPos.y, color );
             //DrawPolygonEdges( vertices [v] );
            // projPos1 = projPos;
-        }
+       //}
     }
 }
-void VertexShader(const vec4& v, ivec2& projPos)
+void VertexShader(const vec4& v, Pixel& projPos) //this function is to covert 3D to 2D vertices
 {
     vec4 P_; //P_ (Origin of the camera)
     P_ = (v - camera_pos) * R;
 
     float x_ = (P_[0]) / (P_[2]) * f + SCREEN_WIDTH / 2;
     float y_ = (P_[1]) / (P_[2]) * f + SCREEN_HEIGHT / 2;
-    projPos.x= x_;
-    projPos.y= y_;
+    float z_ = 1 / (P_[2]); //inverse function for depth
+    
+    //projPos.x= x_;
+    //projPos.y= y_;
 
-   /* p.x = x_;
-    p.y = y_;
-    p.zinv = z_;
-    p.pos3d = v;
-    p.triangle_index = triangle_index;*/
+    projPos.x = x_;
+    projPos.y = y_;
+    projPos.zinv = z_;
+    //p.pos3d = v;
+    //p.triangle_index = triangle_index;
 }
 
-void Interpolate( ivec2 a, ivec2 b, vector<ivec2>& result )
+void Interpolate( Pixel a, Pixel b, vector<Pixel>& result )
 {
 int N = result.size();
-vec2 step = vec2(b-a) / float(max(N-1,1));
-vec2 current( a );
-for( int i=0; i<N; ++i )
+//vec2 step = vec2(b-a) / float(max(N-1,1));
+//vec2 current( a );
+
+    float step_x = float(b.x - a.x) / float(max(N - 1, 1));
+    float step_y = float(b.y - a.y) / float(max(N - 1, 1));
+    float step_zinv = float(b.zinv - a.zinv) / float(max(N - 1, 1));
+
+    for (int i = 0; i < N; i++)
+    {
+        result[i].x = a.x + step_x * i;
+        result[i].y = a.y + step_y * i;
+        result[i].zinv = a.zinv + step_zinv * i;
+
+        //result[i].pos3d[2] = 1 / result[i].zinv + camera_pos[2];
+        //result[i].pos3d[1] = (result[i].y - SCREEN_HEIGHT / 2) / f * (result[i].pos3d[2] - camera_pos[2]) + camera_pos[1];
+        //result[i].pos3d[0] = (result[i].x - SCREEN_WIDTH / 2) / f * (result[i].pos3d[2] - camera_pos[2]) + camera_pos[0];
+        //result[i].triangle_index = a.triangle_index;
+    
+    }
+    
+/*for( int i=0; i<N; ++i )
 {
 result[i] = round(current);
 current += step;
-}
+} */
+
 }
 
-void DrawLineSDL( screen* screen, ivec2 a, ivec2 b, vec3 color )
+void DrawLineSDL( screen* screen, Pixel a, Pixel b, vec3 color )
 {
-
-    ivec2 delta = glm::abs( a - b );
-    int pixels = glm::max( delta.x, delta.y ) + 1;
+    int delta_x = glm::abs(a.x - b.x);
+    int delta_y = glm::abs(a.y - b.y);
+    //Pixel delta = glm::abs( a - b );
+    int pixels = glm::max( delta_x, delta_y ) + 1;
     
     
-    vector<ivec2> line( pixels );
+    vector<Pixel> line(pixels);
     Interpolate( a, b, line );
     
     for (int i=0; i<pixels; i++)
@@ -145,15 +193,18 @@ void DrawLineSDL( screen* screen, ivec2 a, ivec2 b, vec3 color )
     // line = vector<Pixel> (pixels);*/
 
 
-   /* for (int i = 0; i < pixels; i++)
+   /*for (int i = 0; i < pixels; i++)
     {
-        // PutPixelSDL(surface, line[i].x, line[i].y, color);
+        PutPixelSDL(screen, line[i].x, line[i].y, color);
         if (line[i].x >= 0 && line[i].x < SCREEN_WIDTH  && line[i].y >= 0 && line[i].y < SCREEN_HEIGHT)
         {
             if (line[i].zinv > depthBuffer[line[i].x][line[i].y])
             {
                 depthBuffer[line[i].x][line[i].y] = line[i].zinv;
-                vec3 dis = light_pos - line[i].pos3d;
+                }
+        }
+    }
+               vec3 dis = light_pos - line[i].pos3d;
                 float r = glm::length(dis);
 
                 float result = dis[0] * triangles[line[i].triangle_index].normal[0] + dis[1] * triangles[line[i].triangle_index].normal[1] + dis[2] * triangles[line[i].triangle_index].normal[2];
@@ -208,7 +259,7 @@ void DrawPolygonEdges( const vector<vec4>& vertices, screen* screen )
 {
 int V = vertices.size();
 // Transform each vertex from 3D world position to 2D image position:
-vector<ivec2> projectedVertices( V );
+vector<Pixel> projectedVertices( V );
 for( int i=0; i<V; ++i )
 {
 VertexShader( vertices[i], projectedVertices[i] );
@@ -223,6 +274,178 @@ DrawLineSDL (screen, projectedVertices[i], projectedVertices[j], color );
 }
 }
 
+void DrawPolygon( const vector<vec4>& vertices, vec3 color, screen* screen )
+   {
+       int V = vertices.size();
+       vector<Pixel> vertexPixels( V );
+       for( int i=0; i<V; ++i )
+           VertexShader( vertices[i], vertexPixels[i] );
+       vector<Pixel> leftPixels;
+       vector<Pixel> rightPixels;
+        vec3 acu_, acu;
+
+       ComputePolygonRows( vertexPixels, leftPixels, rightPixels );
+       DrawPolygonRows( leftPixels, rightPixels, color, screen);
+       
+    /*int height = 0;
+    for (int i = 0; i < SCREEN_HEIGHT; i = i + 2)
+    {
+        int width = 0;
+        for (int j = 0; j < SCREEN_WIDTH; j = j + 2)
+        {
+            acu_ = vec3(0.0f, 0.0f, 0.0f);
+
+            if (depthBuffer[j][i] > 0 && (1.0f / depthBuffer[j][i]) > 2.5)
+            {
+                for (int k = 0; k < 4; k++)
+                {
+                    int depth = (((1.0f / depthBuffer[j][i]) - 2.5) * 4.0f);
+                    depth = depth - depth / 2 + depth / 2 * (rand() / float(RAND_MAX));
+                    if (j + depth < SCREEN_WIDTH && j - depth >= 0 && i + depth < SCREEN_HEIGHT && i - depth >= 0) {
+
+                        acu = (original_img[j][i] +
+                               original_img[j + depth][i] +
+                               original_img[j][i + depth] +
+                               original_img[j + depth][i + depth] +
+                               original_img[j - depth][i] +
+                               original_img[j][i - depth] +
+                               original_img[j - depth][i - depth] +
+                               original_img[j + depth][i - depth] +
+                               original_img[j - depth][i + depth]) / vec3(9.0f, 9.0f, 9.0f);
+                    }
+                    acu_ = acu_ + acu;
+                }
+
+                anti_aliasing[width][height] = acu_ / 4.0f;
+                PutPixelSDL(screen, width, height, anti_aliasing[width][height]);
+                anti_aliasing[width][height] = vec3(0, 0, 0);
+                width++;
+            }
+            else
+            {
+                anti_aliasing[width][height] = (original_img[j][i] + original_img[j + 1][i] + original_img[j][i + 1] + original_img[j + 1][i + 1]) / vec3(4.0f, 4.0f, 4.0f);
+                PutPixelSDL(screen, width, height, anti_aliasing[width][height]);
+                anti_aliasing[width][height] = vec3(0, 0, 0);
+                width++;
+            }
+        }
+        height++;
+    } */
+}
+
+void ComputePolygonRows(
+       const vector<Pixel>& vertexPixels,
+       vector<Pixel>& leftPixels,
+       vector<Pixel>& rightPixels ) // Trying to compute the start and end postion of array 
+{
+
+   // 1. Find max and min y-value of the polygon
+   //    and compute the number of rows it occupies.
+    int min = numeric_limits<int>::max();
+    int max = 0;
+    vector<Pixel> edge;
+
+    for (size_t i = 0; i < vertexPixels.size(); i++)
+    {
+        if (min > vertexPixels[i].y)
+            min = vertexPixels[i].y;
+        if (max < vertexPixels[i].y)
+            max = vertexPixels[i].y;
+    }
+    int ROWS= max - min + 1; //To calculate the rows (40 − 10 + 1 = 31 rows) 40=max value and 10=min value in notes
+   
+   // 2. Resize leftPixels and rightPixels so that they have an element for each row.
+   // for computing left and right vertices
+    
+    leftPixels = vector<Pixel>(ROWS);
+    rightPixels = vector<Pixel>(ROWS);
+    
+  // 3. Initialize the x-coordinates in leftPixels to some really large value and the x-coordinates in rightPixels to some really small value.
+    
+    for (int i = 0; i < ROWS; i++)
+    {
+        leftPixels[i].x = +numeric_limits<int>::max();
+        rightPixels[i].x = -numeric_limits<int>::max();
+        leftPixels[i].y = min + i;
+        rightPixels[i].y = min + i;
+    }
+    
+   // 4. Loop through all edges of the polygon and use
+   //    linear interpolation to find the x-coordinate for
+   //    each row it occupies. Update the corresponding
+// values in rightPixels and leftPixels. 
+    for (size_t i = 0; i < vertexPixels.size(); i++)
+    {
+        int j = (i + 1) % vertexPixels.size(); // The next vertex
+        // DrawLineSDL(screen, vertexPixels[i], vertexPixels[j], color, edge);
+        int delta_x = glm::abs(vertexPixels[i].x - vertexPixels[j].x);
+        int delta_y = glm::abs(vertexPixels[i].y - vertexPixels[j].y);
+        int pixels = glm::max(delta_x, delta_y) + 1;
+        edge = vector<Pixel> (pixels);
+        Interpolate(vertexPixels[i], vertexPixels[j], edge);
+        
+        for (int a = 0; a < ROWS; a++)
+        {
+            for (size_t b = 0; b < edge.size(); b++)
+            {
+                if (edge[b].y == min + a)
+                {
+                    if (edge[b].x < leftPixels[a].x)
+                    {
+                        leftPixels[a].x = edge[b].x;
+                        leftPixels[a].zinv = edge[b].zinv;
+                    }
+                    if (edge[b].x > rightPixels[a].x)
+                    {
+                        rightPixels[a].x = edge[b].x;
+                        rightPixels[a].zinv = edge[b].zinv;
+                    }
+                }
+            }
+        }
+    }
+}
+
+void DrawPolygonRows(vector<Pixel>& leftPixels, vector<Pixel>& rightPixels, vec3 color, screen* screen)
+{
+
+int size = leftPixels.size();
+  vector<Pixel> line;
+ 
+  for(int i = 0; i < size; i++){
+    ivec2 delta = glm::abs(ivec2(leftPixels[i].x - rightPixels[i].x, leftPixels[i].y - rightPixels[i].y));
+    
+    int pixels = glm::max(delta.x, delta.y) + 1;
+
+    line.clear();
+    line.resize(pixels);
+
+    Interpolate(leftPixels[i], rightPixels[i], line);
+
+    for(int j = 0; j < pixels; j++){
+      PixelShader(line[j], color, screen);
+    }
+  }
+  
+  
+    /*for (size_t i = 0; i < leftPixels.size(); i++) {
+
+        DrawLineSDL(screen, leftPixels[i], rightPixels[i], color);
+        PixelShader(leftPixels[i], color, screen );
+    }*/
+}
+
+void PixelShader( const Pixel& p, vec3 color, screen* screen )
+{
+  int x = p.x;
+       int y = p.y;
+       if( p.zinv > depthBuffer[y][x] )
+       {
+           depthBuffer[y][x] = p.zinv;
+           PutPixelSDL( screen, x, y, color );
+       }
+}
+
 
 /*Place updates of parameters here*/
 bool Update()
@@ -230,7 +453,7 @@ bool Update()
   static int t = SDL_GetTicks();
   /* Compute frame time */
   int t2 = SDL_GetTicks();
-  float dt = float(t2-t);
+  //float dt = float(t2-t);
   t = t2;
 
   SDL_Event e;
