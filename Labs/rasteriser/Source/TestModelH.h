@@ -15,12 +15,14 @@ public:
 	glm::vec4 v2;
 	glm::vec4 normal;
 	glm::vec3 color;
+	
 
 	Triangle( glm::vec4 v0, glm::vec4 v1, glm::vec4 v2, glm::vec3 color )
 		: v0(v0), v1(v1), v2(v2), color(color)
 	{
 		ComputeNormal();
 	}
+	
 
 	void ComputeNormal()
 	{

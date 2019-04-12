@@ -21,6 +21,7 @@ void SDL_Renderframe(screen *s);
 void KillSDL(screen* s);
 void SDL_SaveImage(screen *s, const char* filename);
 
+
 void SDL_SaveImage(screen *s, const char* filename)
 {
   uint32_t rmask, gmask, bmask, amask;
